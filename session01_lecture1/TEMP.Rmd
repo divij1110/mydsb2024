@@ -1,0 +1,15 @@
+```{r}
+planes %>% 
+  count(manufacturer, sort = TRUE)
+```
+
+```{r}
+rent %>% 
+  group_by(county, city, nhood) %>% 
+  summarise(n())
+```
+
+```{r}
+rent %>% 
+  filter(city == 'berkeley')
+```

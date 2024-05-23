@@ -1,0 +1,463 @@
+---
+title: "Homework 2"
+author: "Divij Nandan Sharma"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_float: yes
+    code_folding: show
+  pdf_document:
+    toc: yes
+---
+
+```{r}
+#| label: load-libraries
+#| echo: false # This option disables the printing of code (only output is displayed).
+#| message: false
+#| warning: false
+
+library(tidyverse)
+library(wbstats)
+library(skimr)
+library(countrycode)
+library(here)
+```
+
+# Data Visualisation - Exploration
+
+Now that you've demonstrated your software is setup, and you have the basics of data manipulation, the goal of this assignment is to practice transforming, visualising, and exploring data.
+
+# Exploring credit card fraud
+
+We will be using a dataset with credit card transactions containing legitimate and fraud transactions. Fraud is typically well below 1% of all transactions, so a naive model that predicts that all transactions are legitimate and not fraudulent would have an accuracy of well over 99%-- pretty good, no? (well, not quite as we will see later in the course)
+
+You can read more on credit card fraud on [Credit Card Fraud Detection Using Weighted Support Vector Machine](https://www.scirp.org/journal/paperinformation.aspx?paperid=105944)
+
+The dataset we will use consists of credit card transactions and it includes information about each transaction including customer details, the merchant and category of purchase, and whether or not the transaction was a fraud.
+
+## Obtain the data
+
+The dataset is too large to be hosted on Canvas or Github, so please download it from dropbox <https://www.dropbox.com/sh/q1yk8mmnbbrzavl/AAAxzRtIhag9Nc_hODafGV2ka?dl=0> and save it in your `dsb` repo, under the `data` folder
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+card_fraud <- read_csv(here::here("data", "card_fraud.csv"))
+
+glimpse(card_fraud)
+```
+
+The data dictionary is as follows
+
+| column(variable)      | description                                 |
+|-----------------------|---------------------------------------------|
+| trans_date_trans_time | Transaction DateTime                        |
+| trans_year            | Transaction year                            |
+| category              | category of merchant                        |
+| amt                   | amount of transaction                       |
+| city                  | City of card holder                         |
+| state                 | State of card holder                        |
+| lat                   | Latitude location of purchase               |
+| long                  | Longitude location of purchase              |
+| city_pop              | card holder's city population               |
+| job                   | job of card holder                          |
+| dob                   | date of birth of card holder                |
+| merch_lat             | Latitude Location of Merchant               |
+| merch_long            | Longitude Location of Merchant              |
+| is_fraud              | Whether Transaction is Fraud (1) or Not (0) |
+
+-   In this dataset, how likely are fraudulent transactions? Generate a table that summarizes the number and frequency of fraudulent transactions per year.
+
+```{r}
+# Convert transaction date-time to Date type and extract the year
+card_fraud_clean <- card_fraud %>% 
+  mutate(trans_year = lubridate::year(lubridate::ymd_hms(trans_date_trans_time)))
+
+# Summarize the number and frequency of fraudulent transactions by year
+fraud_summary <- card_fraud_clean %>% 
+  group_by(trans_year) %>% 
+  summarise(
+    total_transactions = n(),
+    fraud_transactions = sum(is_fraud),
+    fraud_frequency = fraud_transactions / total_transactions
+  )
+
+# View the summary
+print(fraud_summary)
+```
+
+-   How much money (in US\$ terms) are fraudulent transactions costing the company? Generate a table that summarizes the total amount of legitimate and fraudulent transactions per year and calculate the % of fraudulent transactions, in US\$ terms.
+
+```{r}
+
+# Ensure the amount is treated as numeric if not already
+card_fraud_clean$amt <- as.numeric(card_fraud_clean$amt)
+
+# Convert transaction date-time to Date type and extract the year if not already
+card_fraud_clean <- card_fraud_clean %>%
+  mutate(trans_year = lubridate::year(lubridate::ymd_hms(trans_date_trans_time)))
+
+# Summarize the total amount of legitimate and fraudulent transactions by year
+amount_summary <- card_fraud_clean %>%
+  group_by(trans_year) %>%
+  summarise(
+    total_amt = sum(amt),
+    fraud_amt = sum(amt[is_fraud == 1]),
+    legit_amt = sum(amt[is_fraud == 0]),
+    fraud_percentage = (fraud_amt / total_amt) * 100
+  )
+
+# View the summary
+print(amount_summary)
+
+```
+
+-   Generate a histogram that shows the distribution of amounts charged to credit card, both for legitimate and fraudulent accounts. Also, for both types of transactions, calculate some quick summary statistics.
+
+```{r}
+
+# There are a few very large transactions that affect how the histogram displays, I will first remove the outliers then create the histogram so that it displays properly
+# Calculate the interquartile range (IQR) for transaction amounts
+iqr_values <- card_fraud_clean %>%
+  summarise(
+    Q1 = quantile(amt, 0.25),
+    Q3 = quantile(amt, 0.75)
+  ) %>%
+  mutate(IQR = Q3 - Q1, Lower_Bound = Q1 - 1.5 * IQR, Upper_Bound = Q3 + 1.5 * IQR)
+
+# Filter out outlier transaction amounts beyond the lower and upper bounds
+filtered_data <- card_fraud_clean %>%
+  filter(amt >= iqr_values$Lower_Bound & amt <= iqr_values$Upper_Bound)
+
+# Histogram of transaction amounts for the filtered data
+ggplot(filtered_data, aes(x = amt, fill = factor(is_fraud))) +
+  geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("Legitimate", "Fraudulent")) +
+  
+# Display legit and fraud transactions separately to account for different frequencies and adjust the scale accordingly
+  facet_wrap(~is_fraud, scales = "free") +
+  labs(fill = "Transaction Type",
+       x = "Transaction Amount ($)",
+       y = "Frequency",
+       title = "Distribution of Transaction Amounts (Outliers Removed)",
+       subtitle = "Blue: Legitimate, Red: Fraudulent") +
+  theme_bw() +
+  NULL
+
+# Print the bounds used to filter outliers
+print(paste("Lower Bound:", iqr_values$Lower_Bound, "Upper Bound:", iqr_values$Upper_Bound))
+
+# Calculate summary statistics for both legitimate and fraudulent transactions
+summary_stats <- card_fraud_clean %>%
+  group_by(is_fraud) %>%
+  summarise(
+    Count = n(),
+    Mean = mean(amt),
+    Median = median(amt),
+    Min = min(amt),
+    Max = max(amt),
+    SD = sd(amt)
+  )
+
+# View the summary statistics
+print(summary_stats)
+
+```
+
+-   What types of purchases are most likely to be instances of fraud? Consider category of merchants and produce a bar chart that shows % of total fraudulent transactions sorted in order.
+
+```{r}
+
+# Calculate the percentage of fraudulent transactions by category
+fraud_by_category <- card_fraud_clean %>%
+  group_by(category) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage)) # Sort by descending order of fraud percentage
+
+# Bar chart of the percentage of fraudulent transactions by merchant category
+ggplot(fraud_by_category, aes(x = reorder(category, -Fraud_Percentage), y = Fraud_Percentage, fill = category)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Merchant Category", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Merchant Category") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_viridis_d(begin = 0.3, end = 0.7, direction = 1, option = "C", guide = "none") + # Color scale for better visual distinction
+  NULL
+
+# Print the table of fraud percentages by category
+print(fraud_by_category)
+
+```
+
+-   When is fraud more prevalent? Which days, months, hours? To create new variables to help you in your analysis, we use the `lubridate` package and the following code
+
+```         
+mutate(
+  date_only = lubridate::date(trans_date_trans_time),
+  month_name = lubridate::month(trans_date_trans_time, label=TRUE),
+  hour = lubridate::hour(trans_date_trans_time),
+  weekday = lubridate::wday(trans_date_trans_time, label = TRUE)
+  )
+```
+```{r}
+
+# Enhance data with additional time components
+card_fraud_clean <- card_fraud_clean %>%
+  mutate(
+    date_only = lubridate::date(trans_date_trans_time),
+    month_name = lubridate::month(trans_date_trans_time, label = TRUE),
+    hour = lubridate::hour(trans_date_trans_time),
+    weekday = lubridate::wday(trans_date_trans_time, label = TRUE, week_start = 1)
+  )
+
+# Analyze fraud by month
+fraud_by_month <- card_fraud_clean %>%
+  group_by(month_name) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage))
+
+# Plot fraud by month
+ggplot(fraud_by_month, aes(x = month_name, y = Fraud_Percentage, fill = month_name)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Month", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Month") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Paired")
+  NULL
+
+# Analyze fraud by hour
+fraud_by_hour <- card_fraud_clean %>%
+  group_by(hour) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage))
+
+# Plot fraud by hour
+ggplot(fraud_by_hour, aes(x = hour, y = Fraud_Percentage, fill = as.factor(hour))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Hour of the Day", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Hour of Day") +
+  theme_bw() +
+  scale_fill_viridis_d() +
+  NULL
+
+# Analyze fraud by weekday
+fraud_by_weekday <- card_fraud_clean %>%
+  group_by(weekday) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage))
+
+# Plot fraud by weekday
+ggplot(fraud_by_weekday, aes(x = weekday, y = Fraud_Percentage, fill = weekday)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Day of the Week", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Day of the Week") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Pastel1") +
+  NULL
+
+```
+
+
+-   Are older customers significantly more likely to be victims of credit card fraud? To calculate a customer's age, we use the `lubridate` package and the following code
+
+```         
+  mutate(
+   age = interval(dob, trans_date_trans_time) / years(1),
+    )
+```
+
+```{r}
+
+# Calculate the age of customers at the time of transaction
+card_fraud_clean <- card_fraud_clean %>%
+  mutate(
+    age = interval(dob, trans_date_trans_time) / years(1)
+  )
+
+# Summary statistics of age for fraudulent vs. non-fraudulent transactions
+age_summary <- card_fraud_clean %>%
+  group_by(is_fraud) %>%
+  summarise(
+    Mean_Age = mean(age, na.rm = TRUE),
+    Median_Age = median(age, na.rm = TRUE),
+    SD_Age = sd(age, na.rm = TRUE)
+  )
+
+# Print the summary statistics
+print(age_summary)
+
+# Optional: Visualizing the distribution of age for fraudulent vs non-fraudulent transactions
+ggplot(card_fraud_clean, aes(x = age, fill = factor(is_fraud))) +
+  geom_histogram(bins = 30, position = "identity", alpha = 0.6) +
+  facet_wrap(~is_fraud, scales = "free") +
+  scale_fill_manual(values = c("blue", "red"), labels = c("Non-Fraudulent", "Fraudulent")) +
+  labs(x = "Age", y = "Frequency", fill = "Transaction Type",
+       title = "Distribution of Customer Age by Transaction Type") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  NULL
+
+# Conduct a t-test to see if the difference in mean ages between groups is statistically significant
+t_test_result <- t.test(age ~ is_fraud, data = card_fraud_clean)
+
+# Print t-test results
+print(t_test_result)
+
+```
+
+-   Is fraud related to distance? The distance between a card holder's home and the location of the transaction can be a feature that is related to fraud. To calculate distance, we need the latidue/longitude of card holders's home and the latitude/longitude of the transaction, and we will use the [Haversine formula](https://en.wikipedia.org/wiki/Haversine_formula) to calculate distance. I adapted code to [calculate distance between two points on earth](https://www.geeksforgeeks.org/program-distance-two-points-earth/amp/) which you can find below
+
+```{r}
+# distance between card holder's home and transaction
+# code adapted from https://www.geeksforgeeks.org/program-distance-two-points-earth/amp/
+
+
+card_fraud <- card_fraud %>%
+  mutate(
+    
+    # convert latitude/longitude to radians
+    lat1_radians = lat / 57.29577951,
+    lat2_radians = merch_lat / 57.29577951,
+    long1_radians = long / 57.29577951,
+    long2_radians = merch_long / 57.29577951,
+    
+    # calculate distance in miles
+    distance_miles = 3963.0 * acos((sin(lat1_radians) * sin(lat2_radians)) + cos(lat1_radians) * cos(lat2_radians) * cos(long2_radians - long1_radians)),
+
+    # calculate distance in km
+    distance_km = 6377.830272 * acos((sin(lat1_radians) * sin(lat2_radians)) + cos(lat1_radians) * cos(lat2_radians) * cos(long2_radians - long1_radians))
+
+  )
+
+```
+
+Plot a boxplot or a violin plot that looks at the relationship of distance and `is_fraud`. Does distance seem to be a useful feature in explaining fraud?
+
+# Exploring sources of electricity production, CO2 emissions, and GDP per capita.
+
+There are many sources of data on how countries generate their electricity and their CO2 emissions. I would like you to create three graphs:
+
+## 1. A stacked area chart that shows how your own country generated its electricity since 2000.
+
+You will use
+
+`geom_area(colour="grey90", alpha = 0.5, position = "fill")`
+
+## 2. A scatter plot that looks at how CO2 per capita and GDP per capita are related
+
+## 3. A scatter plot that looks at how electricity usage (kWh) per capita/day GDP per capita are related
+
+We will get energy data from the Our World in Data website, and CO2 and GDP per capita emissions from the World Bank, using the `wbstats`package.
+
+```{r}
+#| message: false
+#| warning: false
+
+# Download electricity data
+url <- "https://nyc3.digitaloceanspaces.com/owid-public/data/energy/owid-energy-data.csv"
+
+energy <- read_csv(url) %>% 
+  filter(year >= 1990) %>% 
+  drop_na(iso_code) %>% 
+  select(1:3,
+         biofuel = biofuel_electricity,
+         coal = coal_electricity,
+         gas = gas_electricity,
+         hydro = hydro_electricity,
+         nuclear = nuclear_electricity,
+         oil = oil_electricity,
+         other_renewable = other_renewable_exc_biofuel_electricity,
+         solar = solar_electricity,
+         wind = wind_electricity, 
+         electricity_demand,
+         electricity_generation,
+         net_elec_imports,	# Net electricity imports, measured in terawatt-hours
+         energy_per_capita,	# Primary energy consumption per capita, measured in kilowatt-hours	Calculated by Our World in Data based on BP Statistical Review of World Energy and EIA International Energy Data
+         energy_per_gdp,	# Energy consumption per unit of GDP. This is measured in kilowatt-hours per 2011 international-$.
+         per_capita_electricity, #	Electricity generation per capita, measured in kilowatt-hours
+  ) 
+
+# Download data for C02 emissions per capita https://data.worldbank.org/indicator/EN.ATM.CO2E.PC
+co2_percap <- wb_data(country = "countries_only", 
+                      indicator = "EN.ATM.CO2E.PC", 
+                      start_date = 1990, 
+                      end_date = 2022,
+                      return_wide=FALSE) %>% 
+  filter(!is.na(value)) %>% 
+  #drop unwanted variables
+  select(-c(unit, obs_status, footnote, last_updated)) %>% 
+  rename(year = date,
+         co2percap = value)
+
+
+# Download data for GDP per capita  https://data.worldbank.org/indicator/NY.GDP.PCAP.PP.KD
+gdp_percap <- wb_data(country = "countries_only", 
+                      indicator = "NY.GDP.PCAP.PP.KD", 
+                      start_date = 1990, 
+                      end_date = 2022,
+                      return_wide=FALSE) %>% 
+  filter(!is.na(value)) %>% 
+  #drop unwanted variables
+  select(-c(unit, obs_status, footnote, last_updated)) %>% 
+  rename(year = date,
+         GDPpercap = value)
+```
+
+Specific questions:
+
+1.  How would you turn `energy` to long, tidy format?
+2.  You may need to join these data frames
+    -   Use `left_join` from `dplyr` to [join the tables](http://r4ds.had.co.nz/relational-data.html)
+    -   To complete the merge, you need a unique *key* to match observations between the data frames. Country names may not be consistent among the three dataframes, so please use the 3-digit ISO code for each country
+    -   An aside: There is a great package called [`countrycode`](https://github.com/vincentarelbundock/countrycode) that helps solve the problem of inconsistent country names (Is it UK? United Kingdom? Great Britain?). `countrycode()` takes as an input a country's name in a specific format and outputs it using whatever format you specify.
+3.  Write a function that takes as input any country's name and returns all three graphs. You can use the `patchwork` package to arrange the three graphs as shown below
+
+```{r, echo=FALSE, out.width="100%"}
+knitr::include_graphics(here::here("images", "electricity-co2-gdp.png"), error = FALSE)
+```
+
+# Deliverables
+
+There is a lot of explanatory text, comments, etc. You do not need these, so delete them and produce a stand-alone document that you could share with someone. Knit the edited and completed R Markdown (qmd) file as a Word or HTML document (use the "Knit" button at the top of the script editor window) and upload it to Canvas. You must be comitting and pushing your changes to your own Github repo as you go along.
+
+# Details
+
+-   Who did you collaborate with: TYPE NAMES HERE
+-   Approximately how much time did you spend on this problem set: ANSWER HERE
+-   What, if anything, gave you the most trouble: ANSWER HERE
+
+**Please seek out help when you need it,** and remember the [15-minute rule](https://dsb2023.netlify.app/syllabus/#the-15-minute-rule){target="_blank"}. You know enough R (and have enough examples of code from class and your readings) to be able to do this. If you get stuck, ask for help from others, post a question on Slack-- and remember that I am here to help too!
+
+> As a true test to yourself, do you understand the code you submitted and are you able to explain it to someone else?
+
+# Rubric
+
+13/13: Problem set is 100% completed. Every question was attempted and answered, and most answers are correct. Code is well-documented (both self-documented and with additional comments as necessary). Used tidyverse, instead of base R. Graphs and tables are properly labelled. Analysis is clear and easy to follow, either because graphs are labeled clearly or you've written additional text to describe how you interpret the output. Multiple Github commits. Work is exceptional. I will not assign these often.
+
+8/13: Problem set is 60--80% complete and most answers are correct. This is the expected level of performance. Solid effort. Hits all the elements. No clear mistakes. Easy to follow (both the code and the output). A few Github commits.
+
+5/13: Problem set is less than 60% complete and/or most answers are incorrect. This indicates that you need to improve next time. I will hopefully not assign these often. Displays minimal effort. Doesn't complete all components. Code is poorly written and not documented. Uses the same type of plot for each graph, or doesn't use plots appropriate for the variables being analyzed. No Github commits.

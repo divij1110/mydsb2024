@@ -68,6 +68,8 @@ The data dictionary is as follows
 card_fraud_clean <- card_fraud %>% 
   mutate(trans_year = lubridate::year(lubridate::ymd_hms(trans_date_trans_time)))
 
+# this is a comment
+
 # Summarize the number and frequency of fraudulent transactions by year
 fraud_summary <- card_fraud_clean %>% 
   group_by(trans_year) %>% 

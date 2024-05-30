@@ -69,8 +69,8 @@ You need to work with the `payments` and `members` tables and for now we just wa
 
 ```{r}
 # Read the payments and members tables into data frames
-payments <- dbReadTable(sky_westminster, "payments")
-members <- dbReadTable(sky_westminster, "members")
+payments <- dplyr::tbl(sky_westminster, "payments")
+members <- dplyr::tbl(sky_westminster, "members")
 
 # Join the payments and members tables
 joined_data <- payments %>%
@@ -81,8 +81,9 @@ total_amount_by_mp <- joined_data %>%
   group_by(name) %>%
   summarize(total_amount = sum(value, na.rm = TRUE)) %>%
   arrange(desc(total_amount)) %>%
+  collect() %>% 
   mutate(name = fct_reorder(name, total_amount)) %>% 
-  head(10)
+  head(10) 
 
 # Plot the top 10
 ggplot(total_amount_by_mp) +
@@ -112,7 +113,8 @@ most_donations <- joined_data %>%
 most_donations %>% 
   left_join(joined_data, by = "entity") %>% 
   group_by(name) %>% 
-  summarise(amt_recieved = sum(value))
+  summarise(amt_recieved = sum(value)) %>% 
+  collect()
 ```
 
 

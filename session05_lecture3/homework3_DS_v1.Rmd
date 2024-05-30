@@ -34,6 +34,7 @@ library(robotstxt) # check if we're allowed to scrape the data
 library(scales)
 library(sf)
 library(readxl)
+library(duckdb)
 ```
 
 # Money in UK politics
@@ -73,11 +74,11 @@ payments <- dplyr::tbl(sky_westminster, "payments")
 members <- dplyr::tbl(sky_westminster, "members")
 
 # Join the payments and members tables
-joined_data <- payments %>%
+member_joined_data <- payments %>%
   inner_join(members, by = c("member_id" = "id"))
 
 # Calculate the total amount of donations to an MP
-total_amount_by_mp <- joined_data %>%
+total_amount_by_mp <- member_joined_data %>%
   group_by(name) %>%
   summarize(total_amount = sum(value, na.rm = TRUE)) %>%
   arrange(desc(total_amount)) %>%
@@ -93,6 +94,9 @@ ggplot(total_amount_by_mp) +
   NULL
   
 ```
+```{r}
+glimpse(member_joined_data)
+```
 
 
 ## Any `entity` that accounts for more than 5% of all donations?
@@ -100,28 +104,81 @@ ggplot(total_amount_by_mp) +
 Is there any `entity` whose donations account for more than 5% of the total payments given to MPs over the 2020-2022 interval? Who are they and who did they give money to?
 ```{r}
 # Calculate the total amount donations made by an entity
-most_donations <- joined_data %>% 
+most_donations <- member_joined_data %>% 
   group_by(entity) %>% 
   summarise(total_amount = sum(value, na.rm = TRUE)) %>% 
   mutate(perc_donation = total_amount/sum(total_amount)) %>% 
   arrange(desc(perc_donation)) %>% 
   
   # Filter for entities accounting for more than 5% 
-  filter(perc_donation >= 0.05) 
+  filter(perc_donation >= 0.05)
+print(most_donations)
 
 # To find out the recipient of those donations, I left join with the original dataframe
-most_donations %>% 
-  left_join(joined_data, by = "entity") %>% 
+recipient_entity <- most_donations %>% 
+  left_join(member_joined_data, by = "entity") %>% 
   group_by(name) %>% 
-  summarise(amt_recieved = sum(value)) %>% 
-  collect()
+  summarise(amt_recieved = sum(value))
+print(recipient_entity)
 ```
 
+```{r}
+
+donations <- dplyr::tbl(sky_westminster, "party_donations")
+parties <- dplyr::tbl(sky_westminster, "parties")
+
+# Join the donations and parties tables
+party_joined_data <- donations %>%
+  inner_join(parties, by = c("party_id" = "id"))
+
+# Calculate the total amount donations made by an entity
+most_donations <- party_joined_data %>% 
+  group_by(entity) %>% 
+  summarise(total_amount = sum(value, na.rm = TRUE), 
+            perc_donation = value/total_amount) %>% 
+  
+  # Filter for entities accounting for more than 5% 
+  filter(perc_donation >= 0.05) %>% 
+  collect()
+
+# To find out the recipient of those donations, I left join with the original dataframe
+#
+```
 
 ## Do `entity` donors give to a single party or not?
 
 -   How many distinct entities who paid money to MPS are there?
+```{r}
+# Count the number of distinct entities
+distinct_entities <- member_joined_data %>%
+  count(entity) %>% 
+  collect() %>% 
+  nrow()
+print(distinct_entities)
+```
+
 -   How many (as a number and %) donated to MPs belonging to a single party only?
+```{r}
+# Group by entity and check the number of unique parties they have donated to
+single_party_donors <- member_joined_data %>%
+  group_by(entity) %>%
+  filter(n_distinct(party_id) == 1) %>%
+  summarise(total_donations = n())
+
+# Calculate the count and percentage
+single_party_donors_count <- nrow(single_party_donors)
+total_donors_count <- member_joined_data %>%
+  select(entity) %>%
+  distinct() %>%
+  nrow()
+
+percentage_single_party_donors <- (single_party_donors_count / total_donors_count) * 100
+
+# Print the results
+single_party_donors_count
+percentage_single_party_donors
+
+```
 
 ## Which party has raised the greatest amount of money in each of the years 2020-2022?
 
@@ -130,11 +187,35 @@ I would like you to write code that generates the following table.
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_table.png"), error = FALSE)
 ```
+```{r}
+party_summary <- party_joined_data %>%
+  mutate(date = lubridate::date(date),
+         year = lubridate::year(date)) %>% 
+  
+  group_by(year, name) %>% 
+  summarise(total_year_donations = sum(value)) %>% 
+  mutate(prop = total_year_donations/sum(total_year_donations)) %>% 
+  collect()
+print(party_summary)
+```
 
 ... and then, based on this data, plot the following graph.
 
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_graph.png"), error = FALSE)
+```
+```{r}
+party_summary %>% 
+  mutate(name = fct_reorder(name, prop, .desc = TRUE)) %>% 
+  ggplot() +
+  aes(x = year, y = total_year_donations, fill = name) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_y_continuous(labels = scales::comma) +
+  theme_light() +
+  labs(title = "Conservatives have captured the majority of political donations",
+       subtitle = "Donations to political parties, 2020-2022",
+       x = NULL,
+       y = NULL)
 ```
 
 This uses the default ggplot colour pallete, as I dont want you to worry about using the [official colours for each party](https://en.wikipedia.org/wiki/Wikipedia:Index_of_United_Kingdom_political_parties_meta_attributes). However, I would like you to ensure the parties are sorted according to total donations and not alphabetically. You may even want to remove some of the smaller parties that hardly register on the graph. Would facetting help you?
@@ -164,13 +245,68 @@ cdc_data <- open_dataset(here::here("data", "cdc-covid-geography"))
 toc() # stop timer
 
 
-glimpse(cdc_data)
+#glimpse(cdc_data)
 ```
 
 Can you query the database and replicate the following plot?
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "covid-CFR-ICU.png"), error = FALSE)
+```
+
+```{r}
+cdc_data <- cdc_data %>% 
+  head(5000) %>% 
+  collect()
+#glimpse(cdc_data)
+```
+
+```{r}
+# Filter data to get relevant columns and rows
+filtered_data <- cdc_data %>%
+  collect() %>% 
+  filter(!is.na(age_group) & 
+         !is.na(sex) & 
+         !is.na(icu_yn) & 
+         !is.na(death_yn) &
+         death_yn != "Missing" &
+         icu_yn != "Missing"
+         ) %>%
+  mutate(
+    age_group = factor(age_group, levels = c("0 - 17 years", "18 to 49 years", "50 to 64 years", "65+ years")),
+    sex = factor(sex, levels = c("Female", "Male")),
+    icu_yn = factor(icu_yn, levels = c("Yes", "No"))
+  )
+
+# Calculate CFR
+cfr_data <- filtered_data %>%
+  group_by(age_group, sex, icu_yn) %>%
+  summarise(
+    cases = n(),
+    deaths = sum(death_yn == "Yes"),
+    cfr = (deaths / cases) * 100
+  ) %>%
+  ungroup()
+
+# Create the plot
+ggplot(cfr_data, aes(x = age_group, y = cfr, fill = "#F09481")) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  facet_grid(sex ~ icu_yn) +
+  labs(
+    title = "Covid CFR % by age group, sex and ICU Admission",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "none"
+  ) +
+  geom_text(aes(label = round(cfr, 1)), position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
+  coord_flip()
+
 ```
 
 The previous plot is an aggregate plot for all three years of data. What if we wanted to plot Case Fatality Ratio (CFR) over time? Write code that collects the relevant data from the database and plots the following

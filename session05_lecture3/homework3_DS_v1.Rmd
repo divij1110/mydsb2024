@@ -51,7 +51,7 @@ You can [search and explore the results](https://news.sky.com/story/westminster-
 
 The database made available by Simon Willison is an `SQLite` database
 
-```{r}
+```{r 1}
 sky_westminster <- DBI::dbConnect(
   drv = RSQLite::SQLite(),
   dbname = here::here("data", "sky-westminster-files.db")
@@ -60,7 +60,7 @@ sky_westminster <- DBI::dbConnect(
 
 How many tables does the database have?
 
-```{r}
+```{r 2}
 DBI::dbListTables(sky_westminster)
 ```
 
@@ -68,7 +68,7 @@ DBI::dbListTables(sky_westminster)
 
 You need to work with the `payments` and `members` tables and for now we just want the total among all years. To insert a new, blank chunk of code where you can write your beautiful code (and comments!), please use the following shortcut: `Ctrl + Alt + I` (Windows) or `cmd + option + I` (mac)
 
-```{r}
+```{r 3}
 # Read the payments and members tables into data frames
 payments <- dplyr::tbl(sky_westminster, "payments")
 members <- dplyr::tbl(sky_westminster, "members")
@@ -94,15 +94,11 @@ ggplot(total_amount_by_mp) +
   NULL
   
 ```
-```{r}
-glimpse(member_joined_data)
-```
-
 
 ## Any `entity` that accounts for more than 5% of all donations?
 
 Is there any `entity` whose donations account for more than 5% of the total payments given to MPs over the 2020-2022 interval? Who are they and who did they give money to?
-```{r}
+```{r 4}
 # Calculate the total amount donations made by an entity
 most_donations <- member_joined_data %>% 
   group_by(entity) %>% 
@@ -122,33 +118,10 @@ recipient_entity <- most_donations %>%
 print(recipient_entity)
 ```
 
-```{r}
-
-donations <- dplyr::tbl(sky_westminster, "party_donations")
-parties <- dplyr::tbl(sky_westminster, "parties")
-
-# Join the donations and parties tables
-party_joined_data <- donations %>%
-  inner_join(parties, by = c("party_id" = "id"))
-
-# Calculate the total amount donations made by an entity
-most_donations <- party_joined_data %>% 
-  group_by(entity) %>% 
-  summarise(total_amount = sum(value, na.rm = TRUE), 
-            perc_donation = value/total_amount) %>% 
-  
-  # Filter for entities accounting for more than 5% 
-  filter(perc_donation >= 0.05) %>% 
-  collect()
-
-# To find out the recipient of those donations, I left join with the original dataframe
-#
-```
-
 ## Do `entity` donors give to a single party or not?
 
 -   How many distinct entities who paid money to MPS are there?
-```{r}
+```{r 5}
 # Count the number of distinct entities
 distinct_entities <- member_joined_data %>%
   count(entity) %>% 
@@ -158,7 +131,7 @@ print(distinct_entities)
 ```
 
 -   How many (as a number and %) donated to MPs belonging to a single party only?
-```{r}
+```{r 6}
 # Group by entity and check the number of unique parties they have donated to
 single_party_donors <- member_joined_data %>%
   group_by(entity) %>%
@@ -187,7 +160,7 @@ I would like you to write code that generates the following table.
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_table.png"), error = FALSE)
 ```
-```{r}
+```{r 7}
 party_summary <- party_joined_data %>%
   mutate(date = lubridate::date(date),
          year = lubridate::year(date)) %>% 
@@ -204,7 +177,7 @@ print(party_summary)
 ```{r echo=FALSE, out.width="80%"}
 knitr::include_graphics(here::here("images", "total_donations_graph.png"), error = FALSE)
 ```
-```{r}
+```{r 8}
 party_summary %>% 
   mutate(name = fct_reorder(name, prop, .desc = TRUE)) %>% 
   ggplot() +
@@ -222,7 +195,7 @@ This uses the default ggplot colour pallete, as I dont want you to worry about u
 
 Finally, when you are done working with the databse, make sure you close the connection, or disconnect from the database.
 
-```{r}
+```{r 9}
 dbDisconnect(sky_westminster)
 ```
 
@@ -245,7 +218,22 @@ cdc_data <- open_dataset(here::here("data", "cdc-covid-geography"))
 toc() # stop timer
 
 
-#glimpse(cdc_data)
+glimpse(cdc_data)
+```
+```{r 10}
+# Set the temporary directory for DuckDB
+dbExecute(con, "SET temp_directory='C:/Users/Divij/Desktop/mydsb2024/temp'")
+
+# Connect to DuckDB and create a persistent database
+con <- dbConnect(duckdb::duckdb(), dbdir = "cdc_data.db")
+
+# Load the Parquet data into DuckDB
+dbExecute(con, "CREATE TABLE cdc_data AS SELECT * FROM parquet_scan('C:/Users/Divij/Desktop/mydsb2024/data/cdc-covid-geography')")
+
+# Verify the data structure
+cdc_data <- tbl(con, "cdc_data")
+glimpse(cdc_data)
+
 ```
 
 Can you query the database and replicate the following plot?
@@ -254,65 +242,137 @@ Can you query the database and replicate the following plot?
 knitr::include_graphics(here::here("images", "covid-CFR-ICU.png"), error = FALSE)
 ```
 
-```{r}
-cdc_data <- cdc_data %>% 
-  head(5000) %>% 
-  collect()
-#glimpse(cdc_data)
-```
-
-```{r}
-# Filter data to get relevant columns and rows
+```{r 11}
+# Filter and prepare the data
 filtered_data <- cdc_data %>%
-  collect() %>% 
   filter(!is.na(age_group) & 
          !is.na(sex) & 
          !is.na(icu_yn) & 
          !is.na(death_yn) &
          death_yn != "Missing" &
-         icu_yn != "Missing"
+         icu_yn != "Missing" &
+         icu_yn != "Unknown" &
+         sex != "Missing" &
+         sex != "Unknown" &
+         age_group != "Missing"
          ) %>%
+  mutate(
+    age_group = case_when(
+      age_group == "0 - 17 years" ~ "0 - 17 years",
+      age_group == "18 to 49 years" ~ "18 to 49 years",
+      age_group == "50 to 64 years" ~ "50 to 64 years",
+      age_group == "65+ years" ~ "65+ years"
+    ),
+    sex = case_when(
+      sex == "Female" ~ "Female",
+      sex == "Male" ~ "Male"
+    ),
+    icu_yn = case_when(
+      icu_yn == "Yes" ~ "Yes",
+      icu_yn == "No" ~ "No"
+    )
+  ) %>%
+  collect()
+
+```
+
+```{r 12}
+# Ensure the filtered data is correctly converted to factors
+filtered_data <- filtered_data %>%
   mutate(
     age_group = factor(age_group, levels = c("0 - 17 years", "18 to 49 years", "50 to 64 years", "65+ years")),
     sex = factor(sex, levels = c("Female", "Male")),
     icu_yn = factor(icu_yn, levels = c("Yes", "No"))
   )
+```
 
+```{r 13}
 # Calculate CFR
 cfr_data <- filtered_data %>%
   group_by(age_group, sex, icu_yn) %>%
   summarise(
     cases = n(),
     deaths = sum(death_yn == "Yes"),
-    cfr = (deaths / cases) * 100
-  ) %>%
-  ungroup()
+    cfr = (deaths / cases) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r 14}
+# Create the custom labeller function
+icu_labeller <- as_labeller(c("Yes" = "ICU Admission", "No" = "No ICU Admission"))
 
 # Create the plot
-ggplot(cfr_data, aes(x = age_group, y = cfr, fill = "#F09481")) +
-  geom_bar(stat = "identity", position = "dodge", color = "black") +
-  facet_grid(sex ~ icu_yn) +
+ggplot(cfr_data, aes(x = age_group, y = cfr, label_number())) +
+  geom_bar(stat = "identity", position = "dodge", fill = "#F09481") +
+  facet_grid(icu_yn ~ sex, labeller = labeller(icu_yn = icu_labeller)) +
   labs(
     title = "Covid CFR % by age group, sex and ICU Admission",
     x = NULL,
     y = NULL
   ) +
-  theme_minimal() +
+  theme_light() +
   theme(
-    strip.text = element_text(size = 12, face = "bold"),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    legend.position = "none"
+    strip.text = element_text(size = 10)
   ) +
   geom_text(aes(label = round(cfr, 1)), position = position_dodge(width = 0.9), vjust = -0.5, size = 3) +
   coord_flip()
-
 ```
 
 The previous plot is an aggregate plot for all three years of data. What if we wanted to plot Case Fatality Ratio (CFR) over time? Write code that collects the relevant data from the database and plots the following
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-icu-overtime.png"), error = FALSE)
+```
+```{r 15}
+filtered_data_new <- filtered_data %>%
+  filter(age_group != "0 - 17 years") %>% 
+  mutate(
+    case_month = as.Date(paste0(case_month, "-01"))
+  ) 
+# Calculate CFR
+cfr_data_new <- filtered_data_new %>%
+  group_by(case_month, age_group, sex, icu_yn) %>%
+  summarise(
+    cases = n(),
+    deaths = sum(death_yn == "Yes"),
+    cfr = (deaths / cases) * 100,
+    .groups = "drop"
+  ) %>% 
+  filter(case_month != "2020-02-01")
+```
+
+```{r 16, fig.width=14, fig.height=10}
+
+# Create the plot
+ggplot(cfr_data_new, aes(x = case_month, y = cfr, color = age_group, group = age_group)) +
+  geom_line(size = 1) +
+  geom_point() +
+  geom_text(aes(label = round(cfr, 0)), vjust = -0.5, size = 3, check_overlap = TRUE) +
+  facet_grid(icu_yn ~ sex, labeller = labeller(icu_yn = icu_labeller), scales = "free") +
+  scale_x_date(date_labels = "%Y-%m", date_breaks = "1 month") +
+  labs(
+    title = "Covid CFR % by age group, sex and ICU Admission",
+    x = NULL,
+    y = NULL,
+    color = "Age Group",
+    caption = "Source: CDC"
+  ) +
+  theme_light() +
+theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    axis.text.y = element_text(size = 8),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8),
+    plot.caption = element_text(hjust = 0, size = 10)
+  ) +
+  NULL
 ```
 
 For each patient, the dataframe also lists the patient's states and county [FIPS code](https://en.wikipedia.org/wiki/Federal_Information_Processing_Standard_state_code). The CDC also has information on the [NCHS Urban-Rural classification scheme for counties](https://www.cdc.gov/nchs/data_access/urban_rural.htm)
@@ -338,9 +398,151 @@ Can you query the database, extract the relevant information, and reproduce the 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-county-population.png"), error = FALSE)
 ```
+```{r 17}
+# Connect to DuckDB and create a persistent database
+con <- dbConnect(duckdb::duckdb(), dbdir = "cdc_data.db")
+
+# Load the Excel file into a dataframe
+population_classification <- read_excel(here::here("data", "NCHSURCodes2013.xlsx"))
+
+# Write the Excel data to DuckDB
+dbWriteTable(con, "population_classification", population_classification, overwrite = TRUE)
+```
+
+```{r 18}
+# Perform the join operation within DuckDB
+merged_data <- tbl(con, "cdc_data") %>%
+  left_join(tbl(con, "population_classification"), by = c("county_fips_code" = "FIPS code"))
+```
+
+```{r 19}
+# Filter and prepare the data within DuckDB
+filtered_data <- merged_data %>%
+  filter(!is.na(age_group) & 
+         !is.na(sex) & 
+         !is.na(icu_yn) & 
+         !is.na(death_yn) & 
+         !is.na(`2013 code`) & 
+         death_yn != "Missing" & 
+         icu_yn != "Missing" & 
+         icu_yn != "Unknown" & 
+         sex != "Missing" & 
+         sex != "Unknown"
+         ) %>%
+  mutate(
+    case_month = as.Date(paste0(case_month, "-01")),
+    population_classification = case_when(
+      `2013 code` == 1 ~ "1. Large central metro",
+      `2013 code` == 2 ~ "2. Large fringe metro",
+      `2013 code` == 3 ~ "3. Medium metro",
+      `2013 code` == 4 ~ "4. Small metro",
+      `2013 code` == 5 ~ "5. Micropolitan",
+      `2013 code` == 6 ~ "6. Noncore"
+    )
+  ) %>%
+  filter(!is.na(population_classification)) %>% 
+  collect()
+```
+
+```{r 20}
+# Calculate CFR
+cfr_data <- filtered_data %>%
+  group_by(case_month, population_classification) %>%
+  summarise(
+    cases = n(),
+    deaths = sum(death_yn == "Yes"),
+    cfr = (deaths / cases) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r 21, fig.width=14, fig.height=10}
+
+# Create the plot
+ggplot(cfr_data, aes(x = case_month, y = cfr, color = population_classification, group = population_classification)) +
+  geom_line() +
+  geom_text(aes(label = round(cfr, 1)), vjust = -0.5, size = 3, check_overlap = TRUE) +
+  facet_wrap(~ population_classification, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Covid CFR % by county population",
+    x = "Month",
+    y = "CFR (%)",
+    color = "Population Classification",
+    caption = "Source: CDC"
+  ) +
+  scale_x_date(date_labels = "%Y-%m", date_breaks = "1 month") +
+  scale_y_continuous(labels = label_percent(scale = 1)) +
+  theme_light() +
+  theme(
+    strip.text = element_text(size = 12),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    axis.text.y = element_text(size = 8),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+    )
+
+```
+
 
 ```{r echo=FALSE, out.width="100%"}
 knitr::include_graphics(here::here("images", "cfr-rural-urban.png"), error = FALSE)
+```
+```{r 22}
+# Filter and prepare the data
+filtered_data <- filtered_data %>% 
+  mutate(
+    case_month = as.Date(paste0(case_month, "-01")),
+    area_type = case_when(
+      `2013 code` %in% 1:4 ~ "Urban",
+      `2013 code` %in% 5:6 ~ "Rural"
+    )
+  ) %>%
+  filter(!is.na(area_type))
+```
+
+```{r 23}
+# Calculate CFR
+cfr_data <- filtered_data %>%
+  group_by(case_month, area_type) %>%
+  summarise(
+    cases = n(),
+    deaths = sum(death_yn == "Yes"),
+    cfr = (deaths / cases) * 100,
+    .groups = "drop"
+  )
+```
+
+```{r 24, fig.width=10, fig.height=7}
+# Create the plot with percentage y-axis labels
+ggplot(cfr_data, aes(x = case_month, y = cfr, color = area_type, group = area_type)) +
+  geom_line() +
+  geom_point() +
+  geom_text(aes(label = round(cfr, 1)), vjust = -0.5, size = 3, check_overlap = TRUE) +
+  labs(
+    title = "Covid CFR % by rural and urban areas",
+    x = NULL,
+    y = NULL,
+    color = "Counties",
+    caption = "Source: CDC"
+  ) +
+  scale_x_date(date_labels = "%Y-%m", date_breaks = "1 month") +
+  scale_y_continuous(labels = label_percent(scale = 1)) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 12),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    axis.text.y = element_text(size = 8),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8)
+  )
 ```
 
 # Money in US politics
@@ -367,6 +569,18 @@ contributions_tables <- base_url %>%
 ```
 
 -   First, make sure you can scrape the data for 2022. Use janitor::clean_names() to rename variables scraped using `snake_case` naming.
+```{r 25}
+contributions_tables<- contributions_tables %>%
+    html_node("table") %>%      # Assuming the data is in the first table on the page
+    html_table(fill = TRUE)
+  
+  # Clean the variable names
+  contributions <- contributions_tables %>%
+    janitor::clean_names()
+  
+  # View the cleaned data
+  head(contributions_clean)
+```
 
 -   Clean the data:
 
@@ -406,13 +620,69 @@ contributions <- contributions %>%
     -   have one input: the URL of the webpage and should return a data frame.
     -   add a new column to the data frame for `year`. We will want this information when we ultimately have data from all years, so this is a good time to keep track of it. Our function doesn't take a year argument, but the year is embedded in the URL, so we can extract it out of there, and add it as a new column. Use the `str_sub()` function to extract the last 4 characters from the URL. You will probably want to look at the help for this function to figure out how to specify "last 4 characters".
 
+```{r 26}
+
+# Define the function
+scrape_pac <- function(url) {
+  # Check if scraping is allowed
+  if (!paths_allowed(url)) {
+    stop("Scraping is not allowed on this website.")
+  }
+  
+  # Scrape the data
+  contributions_tables <- url %>%
+    read_html() %>%
+    html_node("table") %>%      # Assuming the data is in the first table on the page
+    html_table(fill = TRUE)
+  
+  # Clean the variable names
+  contributions <- contributions_tables %>%
+    janitor::clean_names()
+  
+  # Extract the year from the URL
+  year <- str_sub(url, -4)
+  
+  # Add the year column
+  contributions <- contributions %>%
+    mutate(year = year)
+  
+  return(contributions)
+}
+
+```
+
+
 -   Define the URLs for 2022, 2020, and 2000 contributions. Then, test your function using these URLs as inputs. Does the function seem to do what you expected it to do?
+```{r 27}
+# Define the URLs
+
+url_2022 <- "https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2022"
+url_2021 <- "https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2020"
+url_2020 <- "https://www.opensecrets.org/political-action-committees-pacs/foreign-connected-pacs/2000"
+print(scrape_pac(url_2022))
+print(scrape_pac(url_2021))
+print(scrape_pac(url_2020))
+```
+
 
 -   Construct a vector called `urls` that contains the URLs for each webpage that contains information on foreign-connected PAC contributions for a given year.
+```{r 28}
+urls <- c(url_2022, url_2021, url_2020)
+```
+
 
 -   Map the `scrape_pac()` function over `urls` in a way that will result in a data frame called `contributions_all`.
+```{r 29}
+# Map the function over the URLs and combine the results into a single dataframe
+contributions_all <- map_df(urls, scrape_pac)
+```
+
 
 -   Write the data frame to a csv file called `contributions-all.csv` in the `data` folder.
+```{r 30}
+write_csv(contributions_all, here::here("data", "contributions-all.csv"))
+```
+
 
 # Scraping consulting jobs
 
@@ -459,6 +729,63 @@ url <- str_c(base_url, page)
 -   Map the `scrape_jobs()` function over `pages` in a way that will result in a data frame called `all_consulting_jobs`.
 
 -   Write the data frame to a csv file called `all_consulting_jobs.csv` in the `data` folder.
+
+```{r 31}
+# Check if scraping is allowed
+if (paths_allowed("https://www.consultancy.uk")) {
+  
+  # Define the function to scrape jobs
+  scrape_jobs <- function(url) {
+    # Scrape the data
+    listings_html <- url %>%
+      read_html()
+    
+    # Extract the relevant information
+    jobs <- listings_html %>% html_nodes(".title") %>% html_text(trim = TRUE)
+    firms <- listings_html %>% html_nodes("td.hide-phone") %>% html_text(trim = TRUE)
+    functional_areas <- listings_html %>% html_nodes("td.hide-tablet-and-less") %>% html_text(trim = TRUE)
+    types <- listings_html %>% html_nodes("td.hide-tablet-landscape") %>% html_text(trim = TRUE)
+    
+     # Clean the functional_area values
+    functional_areas <- functional_areas %>%
+    str_replace_all("\\n", " ") %>% # Replace newline characters with space
+    str_replace_all("\\+\\d+", "") %>% # Remove +1, +2, etc.
+    str_squish() %>% # Remove extra whitespace
+    str_replace_all(" ", ", ") # Separate values with ", "
+
+    
+    # Create a dataframe
+    job_listings <- data.frame(
+      job = jobs,
+      firm = firms,
+      functional_area = functional_areas,
+      type = types,
+      stringsAsFactors = FALSE
+    )
+    
+    return(job_listings)
+  }
+  
+  # Define the base URL
+  base_url <- "https://www.consultancy.uk/jobs/page/"
+  
+  # Create a vector of pages 
+  pages <- 1:6
+  
+  # Construct the URLs
+  urls <- str_c(base_url, pages)
+  
+  # Map the function over the URLs and combine the results into a single dataframe
+  all_consulting_jobs <- map_df(urls, scrape_jobs)
+  
+  # Write the dataframe to a CSV file in the data folder
+  write_csv(all_consulting_jobs, here::here("data", "all_consulting_jobs.csv"))
+  
+} else {
+  print("Scraping is not allowed on this website.")
+}
+```
+
 
 # Deliverables
 

@@ -4,3 +4,5 @@
 .Ruserdata
 /data/card_fraud.csv
 /data/cdc-covid-geography
+/session05_lecture3/cdc_data.db
+/session05_lecture3/cdc_data.db.wal

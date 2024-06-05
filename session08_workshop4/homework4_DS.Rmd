@@ -605,8 +605,26 @@ knn_wflow <-
 HEADS UP
 
 1.  How many models have you specified?
+A.  The code specifies five models:
+
+  Logistic Regression (log_spec)
+  Decision Tree (tree_spec)
+  Random Forest (rf_spec)
+  Boosted Tree (xgb_spec)
+  K-nearest Neighbor (knn_spec)
+
 2.  What's the difference between a model specification and a workflow?
+A.  Model Specification:
+
+    A model specification defines the type of model you are going to use (e.g., logistic regression, decision tree) and sets its engine and mode. It includes parameters specific to the model and the engine     it uses.
+    Example: log_spec, tree_spec, rf_spec, xgb_spec, knn_spec.
+    Workflow:
+
+    A workflow combines a model specification with a preprocessing recipe and specifies how the data should be prepared and how the model should be trained. It is a convenient way to bundle together all       the steps required to fit a model, including data preprocessing and model fitting.    
+    Example: log_wflow, tree_wflow, rf_wflow, xgb_wflow, knn_wflow.  
+    
 3.  Do you need to add a formula (e.g., `test ~ .`) if you have a recipe?
+A.  No, you do not need to add a formula if you have a recipe. The recipe already specifies how to preprocess the data and which variables to use. When you add a recipe to a workflow, it handles the data      preprocessing, and the model fitting will use the preprocessed data as defined by the recipe. The formula is not needed because the recipe defines the preprocessing steps, including any variable           selections and transformations.
 
 # Model Comparison
 
@@ -614,6 +632,31 @@ You now have all your models. Adapt the code from slides `code-from-slides-CA-ho
 
 ```{r}
 
+
+# Fit the models using cross-validation
+log_res <- fit_resamples(log_wflow, resamples = bechdel_folds, metrics = metric_set(accuracy))
+tree_res <- fit_resamples(tree_wflow, resamples = bechdel_folds, metrics = metric_set(accuracy))
+rf_res <- fit_resamples(rf_wflow, resamples = bechdel_folds, metrics = metric_set(accuracy))
+xgb_res <- fit_resamples(xgb_wflow, resamples = bechdel_folds, metrics = metric_set(accuracy))
+knn_res <- fit_resamples(knn_wflow, resamples = bechdel_folds, metrics = metric_set(accuracy))
+
+# Collect results
+log_metrics <- collect_metrics(log_res)
+tree_metrics <- collect_metrics(tree_res)
+rf_metrics <- collect_metrics(rf_res)
+xgb_metrics <- collect_metrics(xgb_res)
+knn_metrics <- collect_metrics(knn_res)
+
+# Compare the results
+results <- bind_rows(
+  log_metrics %>% mutate(model = "Logistic Regression"),
+  tree_metrics %>% mutate(model = "Decision Tree"),
+  rf_metrics %>% mutate(model = "Random Forest"),
+  xgb_metrics %>% mutate(model = "Boosted Tree"),
+  knn_metrics %>% mutate(model = "KNN")
+)
+
+print(results)
 ```
 
 # Deliverables
@@ -622,13 +665,14 @@ There is a lot of explanatory text, comments, etc. You do not need these, so del
 
 # Details
 
--   Who did you collaborate with: TYPE NAMES HERE
--   Approximately how much time did you spend on this problem set: ANSWER HERE
--   What, if anything, gave you the most trouble: ANSWER HERE
+-   Who did you collaborate with: N/A
+-   Approximately how much time did you spend on this problem set: ~2hrs
+-   What, if anything, gave you the most trouble: N/A
 
 **Please seek out help when you need it,** and remember the [15-minute rule](https://dsb2023.netlify.app/syllabus/#the-15-minute-rule){target="_blank"}. You know enough R (and have enough examples of code from class and your readings) to be able to do this. If you get stuck, ask for help from others, post a question on Slack-- and remember that I am here to help too!
 
 > As a true test to yourself, do you understand the code you submitted and are you able to explain it to someone else?
+Yes
 
 # Rubric
 

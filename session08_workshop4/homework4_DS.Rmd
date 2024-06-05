@@ -30,6 +30,7 @@ library(rpart.plot)
 library(here)
 library(scales)
 library(vip)
+library(C50)
 ```
 
 # The Bechdel Test
@@ -55,6 +56,14 @@ glimpse(bechdel)
 How many films fail/pass the test, both as a number and as a %?
 
 ```{r}
+# Calculate the number of films that pass and fail the test
+test_summary <- bechdel %>%
+  group_by(test) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+# Display the result
+print(test_summary)
 
 ```
 
@@ -94,7 +103,23 @@ bechdel_test <- testing(data_split)
 Check the counts and % (proportions) of the `test` variable in each set.
 
 ```{r}
+# Function to calculate counts and proportions
+calculate_proportions <- function(data) {
+  data %>%
+    group_by(test) %>%
+    summarise(count = n()) %>%
+    mutate(percentage = count / sum(count) * 100)
+}
 
+# Calculate counts and proportions for the training set
+train_proportions <- calculate_proportions(bechdel_train)
+print("Training Set Proportions")
+print(train_proportions)
+
+# Calculate counts and proportions for the testing set
+test_proportions <- calculate_proportions(bechdel_test)
+print("Testing Set Proportions")
+print(test_proportions)
 ```
 
 ## Feature exploration
@@ -130,6 +155,28 @@ bechdel %>%
   ggpairs(aes(colour=test), alpha=0.2)+
   theme_bw()
 ```
+Key Observations:
+Budget vs. Gross Revenues (Domestic and International):
+
+There is a strong positive correlation between budget_2013 and both domgross_2013 (0.624) and intgross_2013 (0.938). This indicates that films with higher budgets tend to have higher domestic and international gross revenues.
+When separated by Bechdel test results, both passing and failing films show similar positive correlations, but passing films exhibit slightly stronger correlations.
+Gross Revenues (Domestic vs. International):
+
+There is an extremely high correlation (0.956) between domgross_2013 and intgross_2013, suggesting that films that perform well domestically also tend to perform well internationally.
+This relationship holds true for both passing and failing films, though the correlation is slightly higher for passing films.
+Ratings and Scores:
+
+The imdb_rating and metascore are moderately positively correlated (0.737). Films that receive higher IMDb ratings also tend to receive higher Metascores.
+This positive correlation is consistent across both passing and failing films, with passing films showing a slightly higher correlation.
+Correlation with Bechdel Test:
+
+Films that pass the Bechdel test tend to have slightly higher correlations between budget and gross revenues, as well as between gross revenues and ratings/scores.
+The distribution of imdb_rating and metascore shows that films passing the Bechdel test tend to have slightly higher average ratings and scores compared to those that fail.
+
+Implications:
+The strong correlations between budget and gross revenues indicate that financial investment in films is a significant predictor of their box office performance.
+The consistent positive relationship between domestic and international gross revenues suggests that successful films in one market are likely to succeed in others.
+Higher IMDb ratings and Metascores for passing films may imply that audiences and critics respond more positively to films that pass the Bechdel test, reflecting a possible preference for films with better female representation.
 
 ## Categorical variables
 
@@ -147,6 +194,26 @@ bechdel %>%
   summarise(n = n()) %>% 
   mutate(prop = n/sum(n))
 ```
+Analysis by Genre
+The first analysis groups the movies by genre and test.
+
+Observations:
+
+Comedies and dramas have a relatively higher proportion of movies passing the Bechdel test.
+Genres like action, adventure, and animation tend to have higher proportions of movies failing the test.
+All movies categorized as documentaries, musicals, sci-fi, and thrillers pass the Bechdel test, though the sample sizes for these genres are small.
+
+The second analysis groups the movies by rated (movie rating) and test.
+
+Observations:
+
+Movies rated NC-17 have the highest proportion of failures in the Bechdel test.
+G-rated movies also tend to fail the test more often than they pass.
+PG-13 and R-rated movies have a roughly even distribution, with a slight tendency towards failing the test.
+PG-rated movies fail the test more frequently than they pass.
+
+Overall Conclusion
+The analysis indicates that certain genres and ratings are more likely to fail the Bechdel test. Specifically, action, adventure, animation, and crime genres, as well as NC-17 rated movies, have higher proportions of failing the Bechdel test. Conversely, genres such as comedy, drama, and horror have a better record of passing the test. These insights can inform future film productions, highlighting the need for more inclusive representation in specific genres and rating categories.
 
 # Train first models. `test ~ metascore + imdb_rating`
 
@@ -219,16 +286,26 @@ tree_preds %>%
 
 ## Draw the decision tree
 
-```{r}
+```{r, fig.width=10, fig.height=7}
 draw_tree <- 
     rpart::rpart(
         test ~ metascore + imdb_rating,
         data = bechdel_train, # uses data that contains both birth weight and `low`
         control = rpart::rpart.control(maxdepth = 5, cp = 0, minsplit = 10)
-    ) %>% 
-    partykit::as.party()
-plot(draw_tree)
+    )
+#    partykit::as.party()
+#plot(draw_tree)
 
+# Plot the tree using rpart.plot
+rpart.plot(draw_tree, 
+           type = 3, # type of plot: 3 for a more detailed plot
+           extra = 104, # display the number of observations and the percentage
+           under = TRUE, # display the extra text under the box
+           fallen.leaves = TRUE, # place leaf nodes at the bottom of the plot
+           main = "Decision Tree for Bechdel Test",
+           box.palette = "RdBu", # color palette for the boxes
+           shadow.col = "gray", # shadow color
+           nn = TRUE) # display the node numbers
 ```
 
 # Cross Validation
@@ -242,6 +319,13 @@ bechdel_folds <- vfold_cv(data = bechdel_train,
                           strata = test)
 bechdel_folds
 ```
+The code creates a 10-fold cross-validation object using the vfold_cv function from the rsample package, stratified by the test variable. 
+
+The bechdel_folds object returned by this code is a tibble with 10 rows and 2 columns:
+
+splits: A list of the training and testing indices for each fold.
+id: The identifier for each fold (e.g., "Fold01", "Fold02", etc.).
+This object is used in model training to perform cross-validation, helping to evaluate the model's performance more robustly by ensuring that each data point is used for both training and validation.
 
 ## `fit_resamples()`
 

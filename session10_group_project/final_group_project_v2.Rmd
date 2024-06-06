@@ -28,6 +28,7 @@ library(here)
 library(tictoc)
 library(vip)
 library(ranger)
+library(GGally)
 ```
 
 # The problem: predicting credit card fraud
@@ -115,9 +116,226 @@ card_fraud <- card_fraud %>%
 
 ```
 
+```{r}
+glimpse(card_fraud)
+```
+
 ## Exploratory Data Analysis (EDA)
 
 You have done some EDA and you can pool together your group's expertise in which variables to use as features. You can reuse your EDA from earlier, but we expect at least a few visualisations and/or tables to explore teh dataset and identify any useful features.
+
+```{r}
+# There are a few very large transactions that affect how the histogram displays, I will first remove the outliers then create the histogram so that it displays properly
+# Calculate the interquartile range (IQR) for transaction amounts
+iqr_values <- card_fraud %>%
+  summarise(
+    Q1 = quantile(amt, 0.25),
+    Q3 = quantile(amt, 0.75)
+  ) %>%
+  mutate(IQR = Q3 - Q1, Lower_Bound = Q1 - 1.5 * IQR, Upper_Bound = Q3 + 1.5 * IQR)
+
+# Filter out outlier transaction amounts beyond the lower and upper bounds
+filtered_data <- card_fraud %>%
+  filter(amt >= iqr_values$Lower_Bound & amt <= iqr_values$Upper_Bound)
+
+# Histogram of transaction amounts for the filtered data
+ggplot(filtered_data, aes(x = amt, fill = factor(is_fraud))) +
+  geom_histogram(bins = 50, alpha = 0.6, position = "identity") +
+  scale_fill_manual(values = c("red", "blue"), labels = c("Fraudulent", "Legitimate")) +
+  
+# Display legit and fraud transactions separately to account for different frequencies and adjust the scale accordingly
+  facet_wrap(~is_fraud, scales = "free") +
+  labs(fill = "Transaction Type",
+       x = "Transaction Amount ($)",
+       y = "Frequency",
+       title = "Distribution of Transaction Amounts (Outliers Removed)",
+       subtitle = "Blue: Legitimate, Red: Fraudulent") +
+  theme_bw() +
+  NULL
+```
+
+```{r}
+# Histograms for continuous variables
+card_fraud %>%
+  select(amt, city_pop, lat, long, age, distance_miles, distance_km) %>%
+  gather(key = "variable", value = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distribution of Continuous Variables")
+
+```
+```{r}
+# Boxplots for continuous variables grouped by is_fraud
+card_fraud %>%
+  select(is_fraud, amt, city_pop, lat, long, age, distance_miles, distance_km) %>%
+  gather(key = "variable", value = "value", -is_fraud) %>%
+  ggplot(aes(x = is_fraud, y = value, fill = is_fraud)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Boxplots of Continuous Variables by Fraud Status")
+```
+```{r}
+# Correlation matrix
+continuous_vars <- card_fraud %>%
+  select(amt, city_pop, lat, long, age, distance_miles, distance_km)
+
+correlation_matrix <- cor(continuous_vars)
+
+# Visualize correlation matrix
+ggcorrplot::ggcorrplot(correlation_matrix, lab = TRUE, hc.order = TRUE, type = "lower")
+
+```
+```{r}
+# Proportion of fraud by category
+card_fraud %>%
+  group_by(category, is_fraud) %>%
+  summarise(n = n()) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = category, y = prop, fill = is_fraud)) +
+  geom_col(position = "stack") +  
+  theme_minimal() +
+  labs(title = "Proportion of Fraud by Category", y = "Proportion") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+
+```
+```{r}
+# Number of transactions over time
+card_fraud %>%
+  mutate(trans_date = as.Date(trans_date_trans_time)) %>%
+  group_by(trans_date) %>%
+  summarise(transactions = n()) %>%
+  ggplot(aes(x = trans_date, y = transactions)) +
+  geom_line() +
+  theme_minimal() +
+  labs(title = "Number of Transactions Over Time", x = "Date", y = "Number of Transactions")
+```
+```{r}
+
+# Enhance data with additional time components
+card_fraud_clean <- card_fraud_clean %>%
+  mutate(
+    date_only = lubridate::date(trans_date_trans_time),
+    month_name = lubridate::month(trans_date_trans_time, label = TRUE),
+    hour = lubridate::hour(trans_date_trans_time),
+    weekday = lubridate::wday(trans_date_trans_time, label = TRUE, week_start = 1)
+  )
+
+# Analyze fraud by month
+fraud_by_month <- card_fraud_clean %>%
+  group_by(month_name) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage))
+
+# Plot fraud by month
+ggplot(fraud_by_month, aes(x = month_name, y = Fraud_Percentage, fill = month_name)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Month", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Month") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Paired")
+  NULL
+
+# Analyze fraud by hour
+fraud_by_hour <- card_fraud_clean %>%
+  group_by(hour) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage))
+
+# Plot fraud by hour
+ggplot(fraud_by_hour, aes(x = hour, y = Fraud_Percentage, fill = as.factor(hour))) +
+  geom_bar(stat = "identity") +
+  labs(x = "Hour of the Day", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Hour of Day") +
+  theme_bw() +
+  scale_fill_viridis_d() +
+  NULL
+
+# Analyze fraud by weekday
+fraud_by_weekday <- card_fraud_clean %>%
+  group_by(weekday) %>%
+  summarise(
+    Total_Transactions = n(),
+    Fraud_Transactions = sum(is_fraud),
+    Fraud_Percentage = (Fraud_Transactions / Total_Transactions) * 100
+  ) %>%
+  arrange(desc(Fraud_Percentage))
+
+# Plot fraud by weekday
+ggplot(fraud_by_weekday, aes(x = weekday, y = Fraud_Percentage, fill = weekday)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Day of the Week", y = "Percentage of Fraudulent Transactions (%)",
+       title = "Fraudulent Transactions by Day of the Week") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_brewer(palette = "Pastel1") +
+  NULL
+
+```
+
+```{r}
+# Violin plot
+ggplot(card_fraud, aes(x = factor(is_fraud), y = distance_km, fill = factor(is_fraud))) +
+  geom_violin(alpha = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  labs(x = "Fraud Status (0 = Legitimate, 1 = Fraudulent)", y = "Distance in Kilometers",
+       title = "Distance Distribution by Fraud Status") +
+  theme_bw() +
+  scale_fill_manual(values = c("blue", "red"), labels = c("Legitimate", "Fraudulent")) +
+  theme(legend.position = "none")
+```
+### Inferences from the Graphs:
+
+1. **Distribution of Transaction Amounts (Outliers Removed)**:
+   - Fraudulent transactions (in red) tend to have lower transaction amounts compared to legitimate transactions (in blue). Most fraudulent transactions are concentrated below $50.
+   - Legitimate transactions have a wider range of transaction amounts, with a significant number of transactions between $0 and $50.
+
+2. **Distribution of Continuous Variables**:
+   - **Age**: Shows a relatively normal distribution with a peak around 40-60 years.
+   - **amt**: Highly skewed, with most transactions having low amounts.
+   - **city_pop**: Skewed distribution, indicating most transactions occur in cities with lower populations.
+   - **distance_km** and **distance_miles**: Symmetrical distribution, peaking around 50-100 km/miles.
+   - **lat** and **long**: Geographical data showing transactions spread across various latitudes and longitudes.
+
+3. **Boxplots of Continuous Variables by Fraud Status**:
+   - Fraudulent transactions (`is_fraud` = 1) show slightly different distributions for age and transaction amounts compared to legitimate transactions (`is_fraud` = 0).
+   - The transaction amount (`amt`) for fraudulent transactions shows a lower range compared to legitimate transactions.
+   - Other variables like city population, distance, and geographical coordinates do not show significant differences between fraudulent and legitimate transactions.
+
+4. **Correlation Matrix**:
+   - Strong correlation between `distance_km` and `distance_miles` (as expected since they measure the same attribute in different units).
+   - Weak correlations among other variables, indicating that they are relatively independent of each other.
+
+5. **Proportion of Fraud by Category**:
+   - The proportion of fraudulent transactions is very low across all categories, with some categories like `shopping_net` and `travel` having slightly higher fraud rates.
+
+6. **Number of Transactions Over Time**:
+   - There are periodic spikes in the number of transactions, suggesting a weekly or monthly cycle.
+   - A noticeable increase in transaction volume around January 2020.
+
+7. **Distance Distribution by Fraud Status**:
+   - Fraudulent transactions tend to have a slightly higher distribution of distance compared to legitimate transactions.
+   - Both distributions are centered around similar values, but fraudulent transactions show a wider spread.
+
+8. **Fraudulent Transactions by Day of the Week**:
+   - Fraudulent transactions occur more frequently towards the middle of the week (Wednesday and Thursday) and slightly decrease over the weekend.
+
+9. **Fraudulent Transactions by Hour of Day**:
+   - Higher percentages of fraudulent transactions occur late in the evening and early in the morning (around 20:00 - 23:00 hours).
+
+10. **Fraudulent Transactions by Month**:
+    - There is a noticeable variation in the percentage of fraudulent transactions by month, with higher fraud rates in January and February, and lower rates around June and December.
+
 
 Group all variables by type and examine each variable class by class. The dataset has the following types of variables:
 
@@ -244,7 +462,11 @@ What steps are you going to add to your recipe? Do you need to do any log transf
 -   We will take log of the variables transaction amount `amt` and city population `city_pop` since these variables have very skewed distributions.
 
 ```{r, define_recipe}
+# Remove rows with zero or negative values for 'amt' and 'city_pop'
+card_fraud_train <- card_fraud_train %>%
+  filter(amt > 0, city_pop > 0)
 
+# Define recipe
 fraud_rec <- recipe(is_fraud ~ ., data = card_fraud_train) %>%
   step_rm(trans_date_trans_time, city, state, job, dob) %>% 
   step_other(category, threshold = .05) %>% 
